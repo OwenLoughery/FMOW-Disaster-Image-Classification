@@ -1,7 +1,9 @@
 # Critical Infrastructure and Post-Disaster Damage Classification from Satellite Imagery
 
 **Final Project Report**  
+
 **Team Members:** Owen Loughery, Carson Nuebert
+
 **Course:** DATA 402
 
 ## 1. Introduction
