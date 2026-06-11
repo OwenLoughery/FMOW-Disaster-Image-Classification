@@ -1,7 +1,7 @@
 # Critical Infrastructure and Post-Disaster Damage Classification from Satellite Imagery
 
 **Final Project Report**  
-**Team Members:** Owen Loughery, [Partner Name]  
+**Team Members:** Owen Loughery, Carson Nuebert
 **Course:** DATA 402
 
 ## 1. Introduction
@@ -149,7 +149,7 @@ For all three models we used the same train/val/test discipline: tune hyperparam
 
 The headline finding is the clean three-tier progression: each model adds meaningful capability over the previous one. The CNN improves macro-F1 by a factor of 2.7 over the logistic regression baseline, and the pretrained ResNet adds another 29% improvement on top of that.
 
-**[Insert Figure 1: comparison_macro_f1.png]**
+![Test Set Macro-F1 by Model](comparison_macro_f1.png)
 
 Figure 1 shows the macro-F1 comparison visually. The three-tier story is immediately apparent: 0.188, 0.505, 0.653.
 
@@ -166,13 +166,13 @@ Figure 1 shows the macro-F1 comparison visually. The three-tier story is immedia
 | multi-unit_residential | 0.237 | 0.316 | **0.487** | +0.250 |
 | single-unit_residential | 0.291 | **0.742** | 0.733 | +0.442 |
 
-**[Insert Figure 2: comparison_per_class_f1.png]**
+![Per-Class F1-Score Across Models](comparison_per_class_f1.png)
 
 Figure 2 visualizes the per-class comparison. ResNet wins six of eight classes, with notably large margins on classes like construction_site, hospital, and flooded_road. The CNN beats ResNet on impoverished_settlement and essentially ties on single-unit_residential.
 
 ### 4.3 Confusion matrices
 
-**[Insert Figure 3: comparison_confusion_matrices.png]**
+![Confusion Matrices for All Three Models](comparison_confusion_matrices.png)
 
 Figure 3 shows row-normalized confusion matrices for all three models side by side. Row normalization means each row sums to 1, so the diagonal values represent per-class recall (what fraction of true examples in each class were predicted correctly). Off-diagonal values show what the model predicted instead.
 
@@ -283,4 +283,4 @@ Possible directions to extend this project:
 
 ### 6.4 Source code
 
-The complete project including the data pipeline, modeling notebook, and all visualizations is available at [insert GitHub URL]. Reproducing our results requires only cloning the repository, installing dependencies, running `python data_loader.py` (which downloads and preprocesses all data from the public fMoW S3 bucket, taking 20-45 minutes one time), and running the cells of `fmow_modeling.ipynb` in order.
+The complete project including the data pipeline, modeling notebook, and all visualizations is available at https://github.com/OwenLoughery/FMOW-Disaster-Image-Classification/tree/main. Reproducing our results requires only cloning the repository, installing dependencies, running `python data_loader.py` (which downloads and preprocesses all data from the public fMoW S3 bucket, taking 20-45 minutes one time), and running the cells of `fmow_modeling.ipynb` in order.
