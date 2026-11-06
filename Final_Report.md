@@ -14,7 +14,7 @@ The goal of this project is to train machine learning models that automatically 
 
 This problem matters because organizations actively work on it. The xView2 challenge, SpaceNet competitions, and groups like Planet Labs and the World Bank all fund work in this space. The problem is also personally relevant since we live in California, where wildfires are an annual event and SLO County itself has been hit by major fires within the last decade. Automated damage assessment is the kind of thing that helps emergency response teams make faster decisions when minutes matter.
 
-Our project goal is not to achieve state-of-the-art performance on this benchmark. Instead, we wanted to build a clean comparison across three model tiers and measure how much each specific capability adds to performance. The three models we built (logistic regression on flattened pixels as a baseline, a from-scratch CNN, and a pretrained ResNet-18 fine-tuned to our task) each add exactly one capability over the previous model: spatial structure awareness for the CNN, and external prior knowledge from ImageNet pretraining for the ResNet. By comparing them on the same data with the same evaluation, we can quantify the value of each capability separately.
+Our project goal is not to achieve state-of-the-art performance on this benchmark. Instead, we wanted to compare three model tiers on the same data with the same evaluation. The three models represent increasingly capable setups: logistic regression as a linear baseline, a CNN that can learn spatial features, and a pretrained ResNet-18. Because architecture, model size, learning rate, input setup, and pretraining all change across these comparisons, the results show how performance changed across the three setups rather than isolating the effect of any one factor.
 
 ## 2. Dataset and Preprocessing
 
@@ -30,15 +30,15 @@ We selected 8 of the 63 fMoW categories based on relevance to disaster response.
 
 We did not download the full fMoW dataset (over 200 GB) because that would be impractical for a course project. Instead we built a custom Python pipeline (`data_loader.py`) that downloads only the images we need and preprocesses them for training.
 
-For the training set, we sampled up to 1500 locations per class from fMoW's train split. The rare disaster categories (flooded_road, debris_or_rubble, impoverished_settlement, construction_site) have fewer than 1500 locations available, so we used a hybrid sampling strategy. For these "small" classes we kept all available temporal views per location (each fMoW location is photographed multiple times). For the larger classes we kept only one image per location. This hybrid approach gave the rare classes more total training images while preventing the larger classes from dominating, bringing the imbalance ratio from a worst case of about 12:1 down to roughly 3.3:1.
+For the training set, we sampled up to 1500 locations per class from fMoW's train split. The rare disaster categories (flooded_road, debris_or_rubble, impoverished_settlement, construction_site) have fewer than 1500 locations available, so we used a hybrid sampling strategy. For these "small" classes we kept all available temporal views per location (each fMoW location is photographed multiple times). For the larger classes we kept only one image per location. This hybrid approach gave the rare classes more total training images while preventing the larger classes from dominating. In the final training set, the largest class (construction_site, 3,326 images) is about 3.3 times the size of the smallest (hospital, 1,019 images).
 
-For validation and test, we sampled 400 locations per class from fMoW's val split, took exactly one image per location (so near-duplicate temporal views could not inflate evaluation metrics), and randomly split 50/50 into validation and test sets using a fixed random seed for reproducibility. Train and val/test come from completely disjoint sets of geographic locations because they were drawn from different fMoW splits, eliminating any possibility of leakage.
+For validation and test, we sampled 400 locations per class from fMoW's val split, took exactly one image per location (so near-duplicate temporal views could not inflate evaluation metrics), and randomly split 50/50 into validation and test sets using a fixed random seed for reproducibility. Because train and val/test were drawn from different fMoW splits, and validation and test each use one image per location, no fMoW location appears in more than one split.
 
 ### 2.4 Final dataset sizes
 
 | Split | Total Images | Smallest Class | Largest Class | Imbalance Ratio |
 |-------|--------------|----------------|----------------|-----------------|
-| Train | 14,103 | impoverished_settlement (1,366) | construction_site (3,326) | 2.4:1 |
+| Train | 14,103 | hospital (1,019) | construction_site (3,326) | 3.3:1 |
 | Validation | 580 | impoverished_settlement (16) | single-unit_residential (200) | 12.5:1 |
 | Test | 585 | impoverished_settlement (17) | single-unit_residential (200) | 11.8:1 |
 
@@ -72,7 +72,7 @@ Second, fMoW labels are assigned at the location level, not the image level. Thi
 
 ## 3. Models and Methods
 
-We implemented three models that span a clean progression from a linear baseline to a fine-tuned pretrained CNN. Each successive model adds exactly one specific capability over the previous one.
+The models increase in complexity from a linear baseline to a CNN and then to a pretrained ResNet-18, with several training and architecture differences between each setup.
 
 ### 3.1 Model 1: Logistic Regression
 
@@ -84,7 +84,7 @@ The baseline model is multinomial logistic regression on flattened RGB pixel val
 
 **Regularization:** L2 (sklearn's default for LogisticRegression). The regularization strength is controlled by the inverse parameter `C`, where smaller C means stronger regularization.
 
-**Hyperparameter selection:** we swept C across [0.001, 0.01, 0.1, 1.0, 10.0] and selected the value that maximized macro-F1 on the validation set. The best value was C=0.001, the strongest regularization in our grid. This makes sense given the model has 12,288 features but only 14,103 training samples, putting it in a regime where overfitting risk is high without strong regularization. We extended the grid downward to confirm the optimum was not even lower, but C=0.001 remained the best choice.
+**Hyperparameter selection:** we swept C across [0.001, 0.01, 0.1, 1.0, 10.0] and selected the value that maximized macro-F1 on the validation set. The best value was C=0.001, the strongest regularization in our grid. This makes sense given the model has 12,288 features but only 14,103 training samples, putting it in a regime where overfitting risk is high without strong regularization. Because C=0.001 is at the edge of the grid, an even smaller value might do slightly better; the experiments kept in the notebook only cover these five values.
 
 This model serves as the floor: it can find linear correlations between raw pixel intensities and class labels, but it has no notion of spatial structure (every pixel position is treated as an independent feature with no relationship to its neighbors).
 
@@ -98,17 +98,17 @@ A custom CNN built from scratch in PyTorch. The architecture is a fairly standar
 - **Conv block 4:** Conv2d(128 → 256), BatchNorm2d(256), ReLU, MaxPool2d(2). Output: [B, 256, 14, 14].
 - **Classification head:** AdaptiveAvgPool2d(1) collapses spatial dimensions to 1x1, flatten, Dropout(0.5), Linear(256 → 8).
 
-Approximately 360,000 learnable parameters total.
+Approximately 391,000 learnable parameters total.
 
 **Loss function:** weighted cross-entropy. The class weights are computed from training class frequencies and passed to `nn.CrossEntropyLoss(weight=...)`.
 
-**Optimization:** Adam with learning rate 1e-3. Batch size 32. Trained for 30 epochs.
+**Optimization:** Adam with learning rate 1e-3. Batch size 32. The CNN was trained with validation-based checkpoint selection. The notebook does not preserve a reliable total epoch count for the final model.
 
 **Regularization:** dropout (0.5) before the final linear layer, batch normalization after each convolution, and data augmentation (flips and rotations) during training.
 
 **Architectural rationale:** the standard pattern of 3x3 convolutions with padding=1 makes each conv layer spatially shape-preserving, so the conv layers handle channel expansion (3 → 32 → 64 → 128 → 256) while the pooling layers handle spatial reduction (224 → 112 → 56 → 28 → 14). This separation keeps the design clean and avoids needing to track spatial dimensions through every layer. The doubling channel pattern is the modern convention popularized by VGG and ResNet.
 
-**Model selection:** we saved the model weights whenever validation macro-F1 reached a new high during training. The best epoch was epoch 25, with validation macro-F1 = 0.536.
+**Model selection:** we saved the model weights whenever validation macro-F1 reached a new high during training. The best checkpoint came from epoch 25 of the saved training log, with validation macro-F1 = 0.536.
 
 ### 3.3 Model 3: Pretrained ResNet-18 with Transfer Learning
 
@@ -149,7 +149,7 @@ For all three models we used the same train/val/test discipline: tune hyperparam
 | From-scratch CNN | 0.552 | 0.505 | 0.543 | 0.527 | 0.556 |
 | Pretrained ResNet-18 | **0.668** | **0.653** | **0.666** | **0.652** | **0.665** |
 
-The headline finding is the clean three-tier progression: each model adds meaningful capability over the previous one. The CNN improves macro-F1 by a factor of 2.7 over the logistic regression baseline, and the pretrained ResNet adds another 29% improvement on top of that.
+The headline finding is the clear three-model progression in performance. The CNN improves macro-F1 by a factor of 2.7 over the logistic regression baseline. Macro-F1 increased from 0.505 with the CNN to 0.653 with the pretrained ResNet-18, a gain of 0.148.
 
 ![Test Set Macro-F1 by Model](comparison_macro_f1.png)
 
@@ -208,13 +208,13 @@ The training behavior of the three models differs significantly.
 
 **The ResNet showed clear overfitting.** By epoch 30, training accuracy reached 0.935 while validation accuracy stayed around 0.628, a 30-point gap. Validation loss climbed steadily after epoch 7 even as training loss kept falling. This is expected behavior when fine-tuning an 11-million-parameter pretrained model on only 14,000 training images: the model has enough capacity to memorize specific training examples faster than it can extract generalizable patterns. The save-best-model strategy captured the optimal epoch (epoch 13) before overfitting degraded the model's generalization, so the model we evaluated on test was unaffected by the later overfitting. In retrospect, we could have used explicit early stopping to terminate training automatically when validation stopped improving, but the save-best approach gave us the same final result.
 
-**The from-scratch CNN did not overfit.** Train and validation accuracy tracked each other closely throughout 30 epochs, ending at 0.567 train and 0.509 val. The lack of overfitting suggests the from-scratch CNN is actually closer to underfitting than overfitting at our current architecture and training time. More capacity (deeper network, more channels), longer training, or learning rate scheduling could potentially have pushed this model's performance higher without immediately running into overfitting.
+**The from-scratch CNN did not overfit.** Train and validation accuracy tracked each other closely throughout the saved training log, ending at 0.567 train and 0.509 val. The lack of overfitting suggests the from-scratch CNN is actually closer to underfitting than overfitting at our current architecture and training time. More capacity (deeper network, more channels), longer training, or learning rate scheduling could potentially have pushed this model's performance higher without immediately running into overfitting.
 
-**The LR baseline did not overfit either**, but for a different reason. The strong regularization (C=0.001) selected by the validation grid search effectively prevents the 12,288-feature model from memorizing the 14,000 training samples. We confirmed this was the right call because larger C values consistently gave worse validation performance.
+**The LR baseline did not overfit either**, but for a different reason. The strong regularization (C=0.001) selected by the validation grid search effectively prevents the 12,288-feature model from memorizing the 14,000 training samples.
 
 ### 5.3 Specific failure modes
 
-**Hospital is the most persistent failure across all models.** Even the ResNet only achieves F1=0.593 on hospital, well below its average performance. The confusion matrix shows hospitals being confused with construction_site, fire_station, and residential classes. This is genuine task difficulty: separating a hospital from a generic large institutional or commercial building from overhead at 224x224 resolution is hard for any model that does not have access to context like signage, surrounding road networks, or characteristic helipad markings. A human expert might struggle with the same task.
+**Hospital is the most persistent failure across all models.** Even the ResNet only achieves F1=0.593 on hospital, well below its average performance. The confusion matrix shows hospitals most often predicted as fire_station (19%), with smaller shares going to construction_site (8%) and multi-unit_residential (7%). This is genuine task difficulty: separating a hospital from a generic large institutional or commercial building from overhead at 224x224 resolution is hard for any model that does not have access to context like signage, surrounding road networks, or characteristic helipad markings. A human expert might struggle with the same task.
 
 **Multi-unit residential consistently confuses with single-unit residential.** The from-scratch CNN predicts 31% of multi-unit residential as single-unit, and the ResNet has the same confusion. These two classes are genuinely difficult to separate visually because they sit on a continuum of building density rather than being categorically distinct, and the boundary between "large single-unit" and "small multi-unit" is fuzzy in any dataset.
 
@@ -232,7 +232,7 @@ Second, possible feature mismatch. ImageNet pretraining biases the ResNet toward
 
 **Capacity vs. data.** ResNet-18 has roughly 30 times more parameters than our from-scratch CNN. With unlimited data, more capacity is always at least as good. With our limited 14,000 training images, the extra capacity becomes a liability: ResNet overfits hard while the from-scratch CNN does not. The pretrained weights save ResNet from the worst of this by giving it a good starting point that needs less data to refine, but the overfitting trajectory still showed up clearly during training.
 
-**Training time vs. accuracy.** Training the LR baseline takes a few minutes on CPU. The from-scratch CNN takes about 30 minutes for 30 epochs on the laptop's RTX 3060. The ResNet takes about 60 minutes for 30 epochs on the same hardware. The 13.5-point F1 jump from CNN to ResNet is genuinely worth that extra training time, but for applications where compute is constrained, the from-scratch CNN's 0.505 F1 might be the right cost-benefit tradeoff.
+**Training time vs. accuracy.** Training the LR baseline takes a few minutes on CPU. A 30-epoch CNN training run takes about 30 minutes on the laptop's RTX 3060. The ResNet takes about 60 minutes for 30 epochs on the same hardware. The 14.8-point macro-F1 jump from CNN to ResNet is genuinely worth that extra training time, but for applications where compute is constrained, the from-scratch CNN's 0.505 F1 might be the right cost-benefit tradeoff.
 
 **Test set size vs. confidence.** Our smallest test classes (impoverished_settlement, debris_or_rubble) have 17 and 19 examples respectively. This is large enough to compute F1 but small enough that individual per-class metrics are noisy. A larger test set would give us tighter confidence intervals and make small differences between models more interpretable.
 
@@ -258,10 +258,10 @@ Several improvements were considered but not pursued due to time:
 
 ### 6.1 Major findings
 
-This project successfully demonstrated a three-tier progression in classification performance on a satellite imagery problem with real disaster-response relevance. Each successive model added one specific capability and the resulting improvement quantified the value of that capability:
+This project successfully demonstrated a three-tier progression in classification performance on a satellite imagery problem with real disaster-response relevance. Test macro-F1 improved at each step:
 
-- Spatial structure awareness (LR to CNN): macro-F1 from 0.188 to 0.505, a factor of 2.7x improvement.
-- Transfer learning from ImageNet pretraining (CNN to ResNet): macro-F1 from 0.505 to 0.653, an additional 29% improvement.
+- Logistic regression to CNN: macro-F1 from 0.188 to 0.505, a factor of 2.7.
+- Switching from the CNN to the pretrained ResNet-18 increased test macro-F1 from 0.505 to 0.653 (+0.148). Because no ResNet-18 was trained from scratch, this gain cannot be attributed to pretraining alone.
 
 The final ResNet model achieved 0.668 test accuracy and 0.653 macro-F1, with the highest-value class (flooded_road) reaching F1=0.874 with 95% recall. For a disaster-response use case, this means the model could detect nearly every flooded road in test imagery, which is exactly the kind of class where high recall is more valuable than high precision.
 
@@ -271,7 +271,7 @@ The most important methodological lesson was the value of disciplined train/val/
 
 The second lesson was about model capacity in relation to data size. The from-scratch CNN's lack of overfitting and the ResNet's clear overfitting illustrate that picking the right model size depends heavily on how much training data you have. For 14,000 images, a small CNN trained from scratch is at its capacity limit while a large pretrained model can already memorize the training set. Transfer learning is a way to use a large model's representational power without paying the full data cost.
 
-The third lesson was practical. We initially built the pipeline on Google Colab with Drive storage, which proved unreliable at the scale of file operations we needed. Moving the entire workflow to local disk with a custom data pipeline (`data_loader.py`) made everything faster and more stable, and gave us full reproducibility because anyone can clone our repository, run the data pipeline, and recreate every result.
+The third lesson was practical. We initially built the pipeline on Google Colab with Drive storage, which proved unreliable at the scale of file operations we needed. Moving the entire workflow to local disk with a custom data pipeline (`data_loader.py`) made everything faster and more stable, and made the project easy to rerun: anyone can clone the repository and run the data pipeline, and the saved checkpoints reproduce our reported CNN and ResNet results exactly. Retraining without a fixed PyTorch seed gives somewhat different numbers.
 
 ### 6.3 Future work
 
@@ -285,4 +285,4 @@ Possible directions to extend this project:
 
 ### 6.4 Source code
 
-The complete project including the data pipeline, modeling notebook, and all visualizations is available at https://github.com/OwenLoughery/FMOW-Disaster-Image-Classification/tree/main. Reproducing our results requires only cloning the repository, installing dependencies, running `python data_loader.py` (which downloads and preprocesses all data from the public fMoW S3 bucket, taking 20-45 minutes one time), and running the cells of `fmow_modeling.ipynb` in order.
+The complete project including the data pipeline, modeling notebook, and all visualizations is available at https://github.com/OwenLoughery/FMOW-Disaster-Image-Classification/tree/main. Rerunning the project requires cloning the repository, installing dependencies, downloading the data through the provided pipeline (`python data_loader.py`, which downloads and preprocesses all data from the public fMoW S3 bucket, taking 20-45 minutes one time), and running `DisasterClassifier.ipynb`. The saved CNN and ResNet-18 checkpoints reproduce the reported test results exactly; retraining from scratch can produce somewhat different values because the PyTorch training runs were not seeded.
